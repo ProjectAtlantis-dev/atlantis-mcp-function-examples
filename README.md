@@ -247,7 +247,9 @@ We welcome contributions! To add your own examples:
 
 ## 📄 License
 
-[Add your license here]
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+**TL;DR**: You can freely use, modify, distribute, and even use commercially. Just keep the copyright notice.
 
 ## 🔗 Related Projects
 
