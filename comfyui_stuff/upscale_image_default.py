@@ -200,7 +200,7 @@ async def upscale_image_default():
     minipage = minipage.replace("{UPLOAD_ID}", uploadId)
     miniscript = miniscript.replace("{UPLOAD_ID}", uploadId)
 
-    server_address = "0.0.0.0.8188"
+    server_address = "0.0.0.0:8188"
 
     async def process_uploaded_image(filename, filetype, base64Content):
         try:
