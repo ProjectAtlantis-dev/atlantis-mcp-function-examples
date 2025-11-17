@@ -18,7 +18,7 @@ CONFIG_FILE = os.path.join(os.path.dirname(__file__), "marketing_brands.json")
 SOCIAL_TOKENS_FILE = os.path.join(os.path.dirname(__file__), "social_tokens.json")
 
 # Gemini CLI path
-GEMINI_CLI = "/opt/homebrew/bin/gemini"
+GEMINI_CLI = "gemini"
 
 # Configure Gemini API for image generation
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "place-your-gemini-api-key-here")
