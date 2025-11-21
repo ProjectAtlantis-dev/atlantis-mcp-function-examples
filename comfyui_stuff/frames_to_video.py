@@ -22,7 +22,7 @@ def update_workflow_seeds(workflow):
                 node_data["inputs"]["noise_seed"] = random.randint(1, 2**32 - 1)
     return workflow
 
-@visible
+@protected("demo_group")  # Only users authorized by demo_group protection function can call this
 async def frames_to_video(prompt: str = "smooth transition between frames"):
     """
     Creates a video from two images (first and last frame) using ComfyUI workflow
@@ -35,10 +35,18 @@ async def frames_to_video(prompt: str = "smooth transition between frames"):
 
     await atlantis.owner_log(f"frames_to_video called by {username} with prompt: {prompt}")
 
-    # Generate unique upload id to avoid conflicts
+    # Generate unique upload ID to identify this specific upload session
+    # This prevents collisions if multiple users upload at the same time
     uploadId = f"frames2vid_{str(uuid.uuid4()).replace('-', '')[:8]}"
 
-    # Create dual file upload interface with previews
+    # ============================================================================
+    # FRONTEND SETUP: HTML Interface for dual file upload
+    # ============================================================================
+    # This HTML creates a custom upload UI with:
+    # - Two file input buttons (first frame and last frame)
+    # - Live image previews for both frames
+    # - A "Generate Video" button that activates when both frames are selected
+    # - Styled with purple theme matching the ComfyUI aesthetic
     minipage = '''
     <div style="white-space:normal;display:flex;flex-direction:column">
         <style>
@@ -152,6 +160,14 @@ async def frames_to_video(prompt: str = "smooth transition between frames"):
     </div>
     '''
 
+    # ============================================================================
+    # FRONTEND SETUP: JavaScript for handling file uploads
+    # ============================================================================
+    # This script handles:
+    # 1. File selection and preview for both frames
+    # 2. Enable/disable "Generate Video" button based on whether both files are selected
+    # 3. Convert files to base64 and send to server via studioClient.sendRequest("engage")
+    # 4. The uploads trigger callbacks registered below via client_upload()
     miniscript = '''
     //js
     let foo = function() {
@@ -239,9 +255,11 @@ async def frames_to_video(prompt: str = "smooth transition between frames"):
                         reader.readAsDataURL(file1);
                     });
 
-                    // Send first frame
+                    // Send first frame via studioClient
+                    // This calls the _public_upload MCP tool which invokes the callback
+                    // registered via client_upload() below with key "{UPLOAD_ID}_frame1"
                     await studioClient.sendRequest("engage", {
-                        accessToken: "{UPLOAD_ID}_frame1",
+                        accessToken: "{UPLOAD_ID}_frame1",  // Matches the key in client_upload()
                         mode: "upload",
                         content: "not used",
                         data: {
@@ -259,9 +277,11 @@ async def frames_to_video(prompt: str = "smooth transition between frames"):
                         reader.readAsDataURL(file2);
                     });
 
-                    // Send second frame
+                    // Send second frame via studioClient
+                    // This calls the _public_upload MCP tool which invokes the callback
+                    // registered via client_upload() below with key "{UPLOAD_ID}_frame2"
                     await studioClient.sendRequest("engage", {
-                        accessToken: "{UPLOAD_ID}_frame2",
+                        accessToken: "{UPLOAD_ID}_frame2",  // Matches the key in client_upload()
                         mode: "upload",
                         content: "not used",
                         data: {
@@ -282,17 +302,25 @@ async def frames_to_video(prompt: str = "smooth transition between frames"):
     foo()
     '''
 
-    # Replace placeholders
+    # Replace {UPLOAD_ID} and {PROMPT} placeholders in HTML/JS with actual values
     minipage = minipage.replace("{UPLOAD_ID}", uploadId).replace("{PROMPT}", prompt)
     miniscript = miniscript.replace("{UPLOAD_ID}", uploadId)
 
     # ComfyUI configuration
     server_address = "0.0.0.0:8188"
 
-    # Storage for the two frames
+    # ============================================================================
+    # BACKEND SETUP: Frame storage and processing
+    # ============================================================================
+    # Storage dictionary for the two uploaded frames
+    # Since uploads happen separately, we need to collect both before processing
     frame_storage = {}
 
-    # Define callback for when files are uploaded
+    # ============================================================================
+    # CALLBACK: Process both frames once they're both uploaded
+    # ============================================================================
+    # This function is called by both upload callbacks below (upload_frame1 and upload_frame2)
+    # It only proceeds when BOTH frames are present in frame_storage
     async def process_uploaded_frames():
         try:
             # Wait for both frames to arrive
@@ -726,32 +754,49 @@ async def frames_to_video(prompt: str = "smooth transition between frames"):
             await atlantis.owner_log(f"Unexpected error: {e}")
             await atlantis.client_log(f"❌ {error_msg}")
 
-    # Register separate callbacks for each frame
+    # ============================================================================
+    # UPLOAD CALLBACKS: Separate handlers for each frame
+    # ============================================================================
+    # These callbacks are invoked when the frontend sends file data via studioClient.sendRequest("engage")
+    # The _public_upload MCP tool (public, so any user can call it) looks up the callback by key
+
+    # Callback for first frame upload
     async def upload_frame1(filename, filetype, base64Content):
         await atlantis.client_log(f"📥 Received first frame: {filename}")
+        # Store frame data in the shared storage dictionary
         frame_storage['frame1'] = {
             'filename': filename,
             'filetype': filetype,
             'base64Content': base64Content
         }
-        # Check if we have both frames now
+        # Check if we have both frames now - if so, start processing
         if 'frame2' in frame_storage:
             await atlantis.client_log(f"🎬 Starting frames-to-video generation for {username} - this may take 4-10 minutes...")
             await process_uploaded_frames()
 
+    # Callback for second frame upload
     async def upload_frame2(filename, filetype, base64Content):
         await atlantis.client_log(f"📥 Received second frame: {filename}")
+        # Store frame data in the shared storage dictionary
         frame_storage['frame2'] = {
             'filename': filename,
             'filetype': filetype,
             'base64Content': base64Content
         }
-        # Check if we have both frames now
+        # Check if we have both frames now - if so, start processing
         if 'frame1' in frame_storage:
             await atlantis.client_log(f"🎬 Starting frames-to-video generation for {username} - this may take 4-10 minutes...")
             await process_uploaded_frames()
 
-    await atlantis.client_upload(f"{uploadId}_frame1", upload_frame1)
-    await atlantis.client_upload(f"{uploadId}_frame2", upload_frame2)
-    await atlantis.client_html(minipage)
-    await atlantis.client_script(miniscript)
+    # ============================================================================
+    # REGISTER CALLBACKS & INJECT FRONTEND
+    # ============================================================================
+    # Register the upload callbacks with unique keys that match the accessToken in JavaScript
+    # When studioClient.sendRequest("engage", {accessToken: "KEY"}) is called from frontend,
+    # the _public_upload tool looks up the callback by KEY and invokes it
+    await atlantis.client_upload(f"{uploadId}_frame1", upload_frame1)  # Registers callback for first frame
+    await atlantis.client_upload(f"{uploadId}_frame2", upload_frame2)  # Registers callback for second frame
+
+    # Inject the HTML UI and JavaScript into the client
+    await atlantis.client_html(minipage)     # Sends HTML to display in client
+    await atlantis.client_script(miniscript)  # Sends JavaScript to execute in client
